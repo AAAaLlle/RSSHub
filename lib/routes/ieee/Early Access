@@ -1,0 +1,74 @@
+import { Route } from '@/types';
+import { getCurrentPath } from '@/utils/helpers';
+const __dirname = getCurrentPath(import.meta.url);
+
+import got from '@/utils/got';
+import path from 'node:path';
+import { art } from '@/utils/render';
+
+const ieeeHost = 'https://ieeexplore.ieee.org';
+
+export const route: Route = {
+    name: 'IEEE Journal Articles',
+    maintainers: ['HenryQW'],
+    categories: ['journal'],
+    path: '/journal/:isnumber',
+    parameters: {
+        isnumber: 'Issue Number, look for `isnumber` in the URL',
+    },
+    example: '/ieee/journal/5446437',
+    handler,
+};
+
+async function handler(ctx) {
+    const issueNumber = ctx.req.param('isnumber');
+
+    // 获取期刊元数据
+    const metadata = await fetchMetadata(issueNumber);
+    const { displayTitle, coverImagePath } = metadata;
+
+    // 使用 isnumber 获取文章目录
+    const tocData = await fetchTOCData(issueNumber);
+    const list = tocData.records.map((item) => {
+        const mappedItem = mapRecordToItem(item.volume)(item);
+
+        mappedItem.description = art(path.join(__dirname, 'templates/description.art'), {
+            item: mappedItem,
+        });
+
+        return mappedItem;
+    });
+
+    return {
+        title: displayTitle,
+        link: `${ieeeHost}/xpl/tocresult.jsp?isnumber=${issueNumber}`,
+        item: list,
+        image: `${ieeeHost}${coverImagePath}`,
+    };
+}
+
+// 使用 isnumber 获取期刊的元数据
+async function fetchMetadata(isnumber) {
+    const response = await got(`${ieeeHost}/rest/publication/home/metadata?isnumber=${isnumber}`);
+    return response.data;
+}
+
+// 使用 isnumber 获取文章目录
+async function fetchTOCData(isnumber) {
+    const response = await got.post(`${ieeeHost}/rest/search/pub/issue/${isnumber}/toc`, {
+        json: { isnumber, rowsPerPage: '100' },
+    });
+    return response.data;
+}
+
+function mapRecordToItem(volume) {
+    return (item) => ({
+        abstract: item.abstract || '',
+        authors: item.authors ? item.authors.map((author) => author.preferredName).join('; ') : '',
+        description: '',
+        doi: item.doi,
+        link: item.htmlLink,
+        title: item.articleTitle || '',
+        volume,
+    });
+}
